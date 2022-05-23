@@ -48,7 +48,7 @@ func newHTTPUpstreamProxy(upstream options.Upstream, u *url.URL, sigData *option
 	// Set up a WebSocket proxy if required
 	var wsProxy http.Handler
 	if upstream.ProxyWebSockets == nil || *upstream.ProxyWebSockets {
-		wsProxy = newWebSocketReverseProxy(u, upstream.InsecureSkipTLSVerify)
+		wsProxy = newWebSocketReverseProxy(u, upstream, errorHandler)
 	}
 
 	var auth hmacauth.HmacAuth
@@ -163,15 +163,23 @@ func setProxyDirector(proxy *httputil.ReverseProxy) {
 }
 
 // newWebSocketReverseProxy creates a new reverse proxy for proxying websocket connections.
-func newWebSocketReverseProxy(u *url.URL, skipTLSVerify bool) http.Handler {
-	wsProxy := httputil.NewSingleHostReverseProxy(u)
+func newWebSocketReverseProxy(target *url.URL, upstream options.Upstream, errorHandler ProxyErrorHandler) http.Handler {
+	wsProxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Inherit default transport options from Go's stdlib
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 
 	/* #nosec G402 */
-	if skipTLSVerify {
+	if upstream.InsecureSkipTLSVerify {
 		transport.TLSClientConfig.InsecureSkipVerify = true
+	}
+
+	if upstream.PassHostHeader != nil && !*upstream.PassHostHeader {
+		setProxyUpstreamHostHeader(wsProxy, target)
+	}
+
+	if errorHandler != nil {
+		wsProxy.ErrorHandler = errorHandler
 	}
 
 	// Apply the customized transport to our proxy before returning it
